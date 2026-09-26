@@ -1,0 +1,11 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentParameters.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "namePrefix": { "value": "bjjvault-dev" },
+    "sqlAdminLogin": { "value": "bjjvaultadmin" },
+    "sqlAdminPassword": { "value": "REPLACE_ME_OR_PASS_VIA_CLI" },
+    "apimPublisherEmail": { "value": "REPLACE_WITH_YOUR_EMAIL" },
+    "apimPublisherName": { "value": "BJJVault" }
+  }
+}
