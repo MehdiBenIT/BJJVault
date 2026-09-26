@@ -1,0 +1,18 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+*.db
+
+# Node
+node_modules/
+dist/
+
+# Env / secrets
+.env
+k8s/backend-secret.yaml
+
+# Editors / OS
+.DS_Store
+.vscode/
+.idea/
