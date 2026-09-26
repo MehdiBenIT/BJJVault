@@ -1,0 +1,94 @@
+name: deploy
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  RESOURCE_GROUP: bjjvault-dev-rg
+  LOCATION: westeurope
+  NAME_PREFIX: bjjvault-dev
+  AKS_NAME: bjjvault-dev-aks
+
+jobs:
+  infra:
+    runs-on: ubuntu-latest
+    outputs:
+      acrLoginServer: ${{ steps.deploy.outputs.acrLoginServer }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+      - name: Ensure resource group
+        run: az group create --name $RESOURCE_GROUP --location $LOCATION
+      - name: Deploy Bicep
+        id: deploy
+        uses: azure/arm-deploy@v2
+        with:
+          scope: resourcegroup
+          resourceGroupName: ${{ env.RESOURCE_GROUP }}
+          template: infra/main.bicep
+          parameters: >
+            infra/main.parameters.dev.json
+            sqlAdminPassword=${{ secrets.SQL_ADMIN_PASSWORD }}
+            apimPublisherEmail=${{ secrets.APIM_PUBLISHER_EMAIL }}
+
+  backend:
+    needs: infra
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+      - name: Build and push image
+        run: |
+          az acr build \
+            --registry ${{ needs.infra.outputs.acrLoginServer }} \
+            --image bjjvault-backend:${{ github.sha }} \
+            --image bjjvault-backend:latest \
+            backend
+      - name: Get AKS credentials
+        run: az aks get-credentials --resource-group $RESOURCE_GROUP --name $AKS_NAME --overwrite-existing
+      - name: Ensure cluster is running
+        run: az aks start --resource-group $RESOURCE_GROUP --name $AKS_NAME || true
+      - name: Deploy to AKS
+        run: |
+          export ACR_LOGIN_SERVER=${{ needs.infra.outputs.acrLoginServer }}
+          export IMAGE_TAG=${{ github.sha }}
+          envsubst < k8s/backend-deployment.yaml | kubectl apply -f -
+
+  frontend:
+    needs: infra
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - run: npm install
+      - run: npm run build
+        env:
+          VITE_API_BASE_URL: ${{ secrets.APIM_GATEWAY_URL }}
+      - name: Deploy to Azure Static Web Apps
+        uses: Azure/static-web-apps-deploy@v1
+        with:
+          azure_static_web_apps_api_token: ${{ secrets.AZURE_STATIC_WEB_APPS_API_TOKEN }}
+          repo_token: ${{ secrets.GITHUB_TOKEN }}
+          action: upload
+          app_location: frontend/dist
+          skip_app_build: true
+          output_location: ""
